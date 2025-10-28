@@ -26,19 +26,19 @@ db = session.resource('dynamodb')
 table = db.Table(dynamo_table)
 
 def main():
-    key = get_next_key_from_bucket(request_bucket)
-    #while True:
-    if key:
-        logger.info(f"Processing request file: {key}")
-        file_content = get_file_from_s3(request_bucket, key)
-        if storage_scheme == "s3":
-            process_one_request_s3(file_content)
-        elif storage_scheme == "dynamo":
-            process_one_request_dynamo(file_content)
-        delete_file_from_s3(request_bucket, key)
-    else:
-        # wait 100 ms before checking again
-        time.sleep(0.1)
+    while True:
+        key = get_next_key_from_bucket(request_bucket)
+        if key:
+            logger.info(f"Processing request file: {key}")
+            file_content = get_file_from_s3(request_bucket, key)
+            if storage_scheme == "s3":
+                process_one_request_s3(file_content)
+            elif storage_scheme == "dynamo":
+                process_one_request_dynamo(file_content)
+            delete_file_from_s3(request_bucket, key)
+        else:
+            # wait 100 ms before checking again
+            time.sleep(0.1)
 
     #logger.info(f"Consuming resources: {resources} with storage strategy: {storage}")
 
@@ -59,10 +59,12 @@ def delete_file_from_s3(bucket_name: str, s3_key: str):
     client.delete_object(Bucket=bucket_name, Key=s3_key)
 
 def handle_update_request_s3(parsed_request):
-    raise NotImplementedError
+    #raise NotImplementedError
+    pass
 
 def handle_delete_request_s3(parsed_request):
-    raise NotImplementedError
+    #raise NotImplementedError
+    pass
 
 def handle_create_request_s3(parsed_request):
     logger.info(f"Process create request for widget {parsed_request['widgetId']} in request {parsed_request['requestId']}")
@@ -112,10 +114,12 @@ def handle_create_request_dynamo(parsed_request):
     table.put_item(Item=widget)
 
 def handle_delete_request_dynamo(parsed_request):
-    raise NotImplementedError
+    #raise NotImplementedError
+    pass
 
 def handle_update_request_dynamo(parsed_request):
-    raise NotImplementedError
+    #raise NotImplementedError
+    pass
 
 def make_widget_from_request_dynamo(parsed_request: Dict[str, Any]) -> Dict[str, str]:
     widget = {}
