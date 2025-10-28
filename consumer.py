@@ -60,16 +60,16 @@ def handle_create_request(parsed_request, storage_bucket):
     logger.info(f"Process create request for widget {parsed_request['widgetId']} in request {parsed_request['requestId']}")
     widget = make_widget_from_request(parsed_request)
     widget_json = json.dumps(widget)
-    key = f"widgets/{widget['id']}"
+    owner = kebab_owner(parsed_request.get("owner"))
+    key = f"widgets/{owner}/{widget['id']}"
     logger.info(f"Add to s3 bucket {storage_bucket} a widget with key = {key}")
     client.put_object(
             Bucket=storage_bucket,
             Key=key,
             Body=widget_json,
-            ContentType='text')
+            ContentType='application/json')
 
 def make_widget_from_request(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
-    # Create a new dictionary to hold the transformed data
     widget = {}
     for key, value in parsed_request.items():
         if key == 'type' or key == 'requestId':
@@ -83,6 +83,8 @@ def make_widget_from_request(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
             widget[key] = value
     return widget
 
+def kebab_owner(owner: str) -> str:
+    return owner.lower().replace(" ", "-")
 
 def process_one_request(json_string: str, storage_bucket: str):
     parsed_request = json.loads(json_string)
