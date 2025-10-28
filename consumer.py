@@ -11,25 +11,24 @@ args = parser.parse_args()
 def main():
     resources = args.resources
     storage = args.storage
-    file = get_next_file_from_bucket(boto3.client('s3'), 'usu-cs5270-orangutan-requests')
+    key = get_next_key_from_bucket(boto3.client('s3'), 'usu-cs5270-orangutan-requests')
+    if key:
+        file_content = get_file_from_s3(boto3.client('s3'), 'usu-cs5270-orangutan-requests', key)
+        read_one_request(file_content)
     print(f"Consuming resources: {resources} with storage strategy: {storage}")
-    print(f"Next file to process: {file}")
 
-def get_next_file_from_bucket(s3_client: boto3.client, bucket_name: str) -> Optional[str]:
-    list_args = {'Bucket': bucket_name, 'MaxKeys': 1}
-        
-    response = s3_client.list_objects_v2(**list_args)
-
+def get_next_key_from_bucket(s3_client: boto3.client, bucket_name: str) -> Optional[str]:
     response = s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
-    # Check if any objects were returned
     if response.get('Contents'):
-        first_object = response['Contents'][0]
-        s3_key = first_object['Key']
-        print(f"Found next file key to process: {s3_key}")
+        s3_key = response['Contents'][0]['Key']
         return s3_key
     else:
-        print(f"Bucket '{bucket_name}' is empty.")
         return None
+
+def get_file_from_s3(s3_client: boto3.client, bucket_name: str, s3_key: str) -> str:
+    response = s3_client.get_object(Bucket=bucket_name, Key=s3_key)
+    file_content = response['Body'].read().decode('utf-8')
+    return file_content
 
 def read_one_request(json_string: str):
     parsed_request = json.loads(json_string)
