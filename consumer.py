@@ -6,27 +6,35 @@ import time
 from typing import Optional, Dict, Any
 
 parser = argparse.ArgumentParser(description="A consumer program to interact with producers.")
-parser.add_argument("resources", type=str, help="Resources.")
-parser.add_argument("storage", type=str, help="Storage strategy.")
+parser.add_argument("-r", type=str, default="usu-cs5270-orangutan-requests", help="Source bucket for requests.")
+parser.add_argument("-d", choices=["s3", "dynamo"], default="s3", help="Destination storage scheme.")
+parser.add_argument("-b", type=str, default="usu-cs5270-orangutan-web", help="Storage bucket if using s3.")
+parser.add_argument("-t", type=str, default="widgets", help="Dynamo table name if using dynamo.")
+args = parser.parse_args()
+request_bucket = args.r
+storage_scheme = args.d
+storage_bucket = args.b
+dynamo_table = args.t
+
 # configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-client = boto3.client('s3')
-args = parser.parse_args()
+session = boto3.Session(region_name='us-east-1')
+client = session.client('s3')
+db = session.resource('dynamodb')
+table = db.Table(dynamo_table)
 
 def main():
-    resources = args.resources
-    request_bucket = 'usu-cs5270-orangutan-requests'
-    storage = args.storage
-    storage_bucket = 'usu-cs5270-orangutan-web'
-
     key = get_next_key_from_bucket(request_bucket)
     #while True:
     if key:
         logger.info(f"Processing request file: {key}")
         file_content = get_file_from_s3(request_bucket, key)
-        process_one_request(file_content, storage_bucket)
+        if storage_scheme == "s3":
+            process_one_request_s3(file_content)
+        elif storage_scheme == "dynamo":
+            process_one_request_dynamo(file_content)
         delete_file_from_s3(request_bucket, key)
     else:
         # wait 100 ms before checking again
@@ -50,13 +58,13 @@ def get_file_from_s3(bucket_name: str, s3_key: str) -> str:
 def delete_file_from_s3(bucket_name: str, s3_key: str):
     client.delete_object(Bucket=bucket_name, Key=s3_key)
 
-def handle_update_request(parsed_request, storage_bucket):
+def handle_update_request_s3(parsed_request):
     raise NotImplementedError
 
-def handle_delete_request(parsed_request, storage_bucket):
+def handle_delete_request_s3(parsed_request):
     raise NotImplementedError
 
-def handle_create_request(parsed_request, storage_bucket):
+def handle_create_request_s3(parsed_request):
     logger.info(f"Process create request for widget {parsed_request['widgetId']} in request {parsed_request['requestId']}")
     widget = make_widget_from_request(parsed_request)
     widget_json = json.dumps(widget)
@@ -86,24 +94,55 @@ def make_widget_from_request(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
 def kebab_owner(owner: str) -> str:
     return owner.lower().replace(" ", "-")
 
-def process_one_request(json_string: str, storage_bucket: str):
+def process_one_request_s3(json_string: str):
     parsed_request = json.loads(json_string)
     if parsed_request["type"] == "create":
-        handle_create_request(parsed_request, storage_bucket)
+        handle_create_request_s3(parsed_request)
     elif parsed_request["type"] == "delete":
-        handle_delete_request(parsed_request, storage_bucket)
+        handle_delete_request_s3(parsed_request)
     elif parsed_request["type"] == "update":
-        handle_update_request(parsed_request, storage_bucket)
-        
+        handle_update_request_s3(parsed_request)
 
-    # debug useful request internals
-    logger.debug("parsed_request type: %s", type(parsed_request))
-    logger.debug("request type: %s", parsed_request.get("type"))
-    logger.debug("label: %s", parsed_request.get("label"))
-    # show first otherAttribute name if present
-    if parsed_request.get("otherAttributes"):
-        first_attr = parsed_request["otherAttributes"][0]
-        logger.debug("first otherAttribute name: %s", first_attr.get("name"))
+def handle_create_request_dynamo(parsed_request):
+    logger.info(f"Process create request for widget {parsed_request['widgetId']} in request {parsed_request['requestId']}")
+    widget = make_widget_from_request_dynamo(parsed_request)
+    owner = kebab_owner(parsed_request.get("owner"))
+    key = f"widgets/{owner}/{widget['id']}"
+    logger.info(f"Add to dynamo table {dynamo_table} a widget with key = {key}")
+    table.put_item(Item=widget)
+
+def handle_delete_request_dynamo(parsed_request):
+    raise NotImplementedError
+
+def handle_update_request_dynamo(parsed_request):
+    raise NotImplementedError
+
+def make_widget_from_request_dynamo(parsed_request: Dict[str, Any]) -> Dict[str, str]:
+    widget = {}
+    for key, value in parsed_request.items():
+        if key == 'type' or key == 'requestId':
+            # Skip these keys (remove them)
+            continue
+        elif key == 'widgetId':
+            # Rename 'widgetId' to 'id'
+            widget['id'] = value
+        elif key == 'otherAttributes':
+            # Expand 'otherAttributes' into individual fields
+            for attr in value:
+                widget[attr['name']] = attr['value']
+        else:
+            # Copy all other fields as is
+            widget[key] = value
+    return widget
+
+def process_one_request_dynamo(json_string: str):
+    parsed_request = json.loads(json_string)
+    if parsed_request["type"] == "create":
+        handle_create_request_dynamo(parsed_request)
+    elif parsed_request["type"] == "delete":
+        handle_delete_request_dynamo(parsed_request)
+    elif parsed_request["type"] == "update":
+        handle_update_request_dynamo(parsed_request)
 
 if __name__ == "__main__":
     main()
