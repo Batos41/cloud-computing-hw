@@ -256,27 +256,40 @@ def main():
 
     logger.info(f"Consumer started. Polling bucket '{request_bucket}'. Strategy: '{storage_scheme}'.")
 
-    # Main polling loop
+    # Main polling loop with idle timeout
+    # Exit if no requests are received for `idle_timeout` seconds.
+    idle_timeout = 30.0
+    last_request_time = time.time()
     while True:
         key = None
         try:
             key = get_next_key_from_bucket(request_bucket)
             if key:
+                # Reset the idle timer when we find a request
+                last_request_time = time.time()
                 logger.info(f"Found request file: {key}")
                 file_content = get_file_from_s3(request_bucket, key)
-                
+
                 # Process using the chosen strategy
                 storage_strategy.process_request(file_content)
-                
+
                 # Delete after successful processing
                 delete_file_from_s3(request_bucket, key)
                 logger.info(f"Successfully processed and deleted request file: {key}")
-                
+
                 # Continue immediately to check for more messages
-                continue 
-            
+                continue
+
             else:
-                # No request found, wait a bit (100ms)
+                # No request found; check idle timeout
+                elapsed = time.time() - last_request_time
+                if elapsed >= idle_timeout:
+                    logger.info(
+                        f"No requests received for {idle_timeout} seconds. Shutting down consumer."
+                    )
+                    break
+
+                # No request found yet, wait a bit (100ms)
                 time.sleep(0.1)
 
         except json.JSONDecodeError as e:
@@ -284,18 +297,18 @@ def main():
             if key:
                 # Delete 'poison pill' message so we don't get stuck
                 delete_file_from_s3(request_bucket, key)
-        
+
         except ClientError as e:
-             # Handle AWS service errors (e.g., permission denied)
-             logger.error(f"AWS Client Error processing key {key}: {e}", exc_info=True)
-             time.sleep(1) # Wait longer on AWS errors
+            # Handle AWS service errors (e.g., permission denied)
+            logger.error(f"AWS Client Error processing key {key}: {e}", exc_info=True)
+            time.sleep(1)  # Wait longer on AWS errors
 
         except Exception as e:
             # Catch-all for other processing errors
             logger.error(f"Unhandled error processing key {key}: {e}", exc_info=True)
             # Delete the key to prevent re-processing a persistent error
             if key:
-                 delete_file_from_s3(request_bucket, key)
+                delete_file_from_s3(request_bucket, key)
             time.sleep(1)
 
 
